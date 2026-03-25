@@ -1,5 +1,3 @@
-<?php
-
 /**
  * ---------------------------------------------------------------------
  *
@@ -8,7 +6,6 @@
  * http://glpi-project.org
  *
  * @copyright 2015-2026 Teclib' and contributors.
- * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
  * ---------------------------------------------------------------------
@@ -33,30 +30,22 @@
  * ---------------------------------------------------------------------
  */
 
-if (Config::canUpdate()) {
-    if (isset($_POST['mode']) && in_array($_POST['mode'], [
-        Session::NORMAL_MODE,
-        Session::DEBUG_MODE,
-    ])) {
-        // Mode was manually specified
-        $mode = $_POST['mode'];
-    } else {
-        // Toggle
-        $mode = ($_SESSION['glpi_use_mode'] == Session::DEBUG_MODE ? Session::NORMAL_MODE : Session::DEBUG_MODE);
+import { Page } from "@playwright/test";
+import { GlpiPage } from "./GlpiPage";
+
+export class NotificationTemplatePage extends GlpiPage
+{
+    public constructor(page: Page)
+    {
+        super(page);
     }
 
-    $user = new User();
-    $user->update(
-        [
-            'id'        => Session::getLoginUserID(),
-            'use_mode'  => $mode,
-        ]
-    );
-    Session::addMessageAfterRedirect(
-        $_SESSION['glpi_use_mode'] == Session::DEBUG_MODE
-         ? __s('Debug mode has been enabled!')
-         : __s('Debug mode has been disabled!')
-    );
+    public async goto(id: number, tab?: string): Promise<void>
+    {
+        let url = `/front/notificationtemplate.form.php?id=${id}`;
+        if (tab) {
+            url += `&forcetab=${tab}`;
+        }
+        await this.page.goto(url);
+    }
 }
-
-Html::back();
