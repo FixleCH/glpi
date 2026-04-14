@@ -32,30 +32,43 @@
  * ---------------------------------------------------------------------
  */
 
-namespace GlpiPlugin\Tester\Controller;
+namespace Glpi\Controller\Config;
 
+use AuthLDAP;
+use AuthLdapReplicate;
 use Glpi\Controller\AbstractController;
+use Glpi\Exception\Http\AccessDeniedHttpException;
+use Glpi\Exception\Http\NotFoundHttpException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
-final class TesterController extends AbstractController
+final class LDAPController extends AbstractController
 {
-    #[Route("/", name: "testerplugin_index", methods: ['GET'])]
-    public function index(Request $request): Response
+    #[Route(
+        "/AuthLDAP/{authldaps_id}/Replica/{authldapreplicates_id}/Test",
+        name: "authldap_replica_status",
+        requirements: [
+            'authldaps_id' => '\d+',
+            'authldapreplicates_id' => '\d+',
+        ],
+        methods: ['POST'],
+    )]
+    public function testReplica(Request $request): Response
     {
-        return new Response('Greeting from tester plugin controller / route.');
-    }
+        if (!AuthLDAP::canUpdate()) {
+            throw new AccessDeniedHttpException();
+        }
+        $authldap = new AuthLDAP();
+        $replicate = new AuthLdapReplicate();
+        if (!$authldap->getFromDB($request->get('authldaps_id')) || !$replicate->getFromDB($request->get('authldapreplicates_id'))) {
+            throw new NotFoundHttpException();
+        }
 
-    #[Route("/Testuri", name: "testerplugin_test", methods: ['GET'])]
-    public function test(Request $request): Response
-    {
-        return new Response('Greeting from tester plugin controller /Testuri route.');
-    }
-
-    #[Route("/post-only", name: "testerplugin_post_only", methods: ['POST'])]
-    public function postOnly(Request $request): Response
-    {
-        return new Response('Greeting from tester plugin POST-only route.');
+        if (AuthLDAP::testLDAPConnection($authldap->getID(), $replicate->getID())) {
+            return new Response();
+        } else {
+            return new Response('', Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }

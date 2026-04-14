@@ -32,38 +32,41 @@
  * ---------------------------------------------------------------------
  */
 
-namespace Glpi\Form\Destination;
+use function Safe\preg_match;
+use function Safe\scandir;
 
-use CommonITILObject;
-use Glpi\Form\Destination\CommonITILField\CausesField;
-use Glpi\Form\Destination\CommonITILField\ImpactsField;
-use Glpi\Form\Destination\CommonITILField\SLATTRField;
-use Glpi\Form\Destination\CommonITILField\SymptomsField;
-use Override;
-use Problem;
-
-final class FormDestinationProblem extends AbstractCommonITILFormDestination
+/**
+ * Update from 11.0.6 to 11.0.7
+ *
+ * @return bool for success (will die for most error)
+ **/
+function update1106to1107()
 {
-    #[Override]
-    public function getTarget(): CommonITILObject
-    {
-        return new Problem();
+    /**
+     * @var DBmysql $DB
+     * @var Migration $migration
+     */
+    global $DB, $migration;
+
+    $updateresult       = true;
+    $ADDTODISPLAYPREF   = [];
+    $DELFROMDISPLAYPREF = [];
+    $update_dir = __DIR__ . '/update_11.0.6_to_11.0.7/';
+
+    $migration->setVersion('11.0.7');
+
+    $update_scripts = scandir($update_dir);
+    foreach ($update_scripts as $update_script) {
+        if (preg_match('/\.php$/', $update_script) !== 1) {
+            continue;
+        }
+        require $update_dir . $update_script;
     }
 
-    #[Override]
-    public function getWeight(): int
-    {
-        return 30;
-    }
+    // ************ Keep it at the end **************
+    $migration->updateDisplayPrefs($ADDTODISPLAYPREF, $DELFROMDISPLAYPREF);
 
-    #[Override]
-    protected function defineConfigurableFields(): array
-    {
-        return array_merge(parent::defineConfigurableFields(), [
-            new ImpactsField(),
-            new CausesField(),
-            new SymptomsField(),
-            new SLATTRField(support_only_dates: true),
-        ]);
-    }
+    $migration->executeMigration();
+
+    return $updateresult;
 }

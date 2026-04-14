@@ -8,6 +8,7 @@
  * http://glpi-project.org
  *
  * @copyright 2015-2026 Teclib' and contributors.
+ * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
  * ---------------------------------------------------------------------
@@ -32,38 +33,13 @@
  * ---------------------------------------------------------------------
  */
 
-namespace Glpi\Form\Destination;
+namespace Glpi\Form\QuestionType;
 
-use CommonITILObject;
-use Glpi\Form\Destination\CommonITILField\CausesField;
-use Glpi\Form\Destination\CommonITILField\ImpactsField;
-use Glpi\Form\Destination\CommonITILField\SLATTRField;
-use Glpi\Form\Destination\CommonITILField\SymptomsField;
-use Override;
-use Problem;
-
-final class FormDestinationProblem extends AbstractCommonITILFormDestination
-{
-    #[Override]
-    public function getTarget(): CommonITILObject
-    {
-        return new Problem();
-    }
-
-    #[Override]
-    public function getWeight(): int
-    {
-        return 30;
-    }
-
-    #[Override]
-    protected function defineConfigurableFields(): array
-    {
-        return array_merge(parent::defineConfigurableFields(), [
-            new ImpactsField(),
-            new CausesField(),
-            new SymptomsField(),
-            new SLATTRField(support_only_dates: true),
-        ]);
-    }
-}
+/**
+ * Marker interface for question types whose formatRawAnswer() returns
+ * already-safe HTML that must NOT be automatically escaped.
+ *
+ * Question types that do NOT implement this interface will have their
+ * formatted answer automatically HTML-escaped by Answer::getFormattedAnswer().
+ */
+interface RawAnswerIsHtmlInterface {}
