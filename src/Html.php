@@ -2659,7 +2659,7 @@ TWIG,
         $placeholder = htmlescape($p['placeholder']);
 
         $output = <<<HTML
-      <div class="button-group flex-grow-1 flatpickr d-flex align-items-center" id="showdate{$rand}" data-bs-toggle="tooltip" data-bs-placement="bottom" title="{$calendar_tooltip}">
+      <div class="btn-group flex-grow-1 flatpickr" id="showdate{$rand}" data-bs-toggle="tooltip" data-bs-placement="bottom" title="{$calendar_tooltip}">
          <input type="text" name="{$name}" size="{$size}"
                 {$required} {$disabled} data-input placeholder="{$placeholder}" class="form-control rounded-start ps-2">
          $calendar_btn
@@ -6668,8 +6668,6 @@ CSS;
     {
         $file = preg_replace('/\.scss$/', '', $file);
 
-        $file = str_replace(DIRECTORY_SEPARATOR, '/', $file);
-
         return self::getScssCompileDir($root_dir) . '/' . str_replace('/', '_', $file) . '.min.css';
     }
 
@@ -6682,7 +6680,7 @@ CSS;
      */
     public static function getScssCompileDir(string $root_dir = GLPI_ROOT)
     {
-        return str_replace(DIRECTORY_SEPARATOR, '/', $root_dir) . '/public/css_compiled';
+        return $root_dir . '/public/css_compiled';
     }
 
     /**

@@ -894,20 +894,7 @@ final class SQLProvider implements SearchProviderInterface
                             ]
                         )
                     ) {
-                        $criteria['OR'][] = [
-                            'AND' => [
-                                "`glpi_ticketvalidations`.`itemtype_target`" => User::class,
-                                "`glpi_ticketvalidations`.`items_id_target`" => Session::getLoginUserID(),
-                            ],
-                        ];
-                        if (count($_SESSION['glpigroups'])) {
-                            $criteria['OR'][] = [
-                                'AND' => [
-                                    "`glpi_ticketvalidations`.`itemtype_target`" => Group::class,
-                                    "`glpi_ticketvalidations`.`items_id_target`" => $_SESSION['glpigroups'],
-                                ],
-                            ];
-                        }
+                        $criteria['OR'][] = TicketValidation::getTargetCriteriaForUser((int) Session::getLoginUserID());
                     }
                 }
                 break;
@@ -2012,7 +1999,7 @@ final class SQLProvider implements SearchProviderInterface
                 case "progressbar":
                     $decimal_contains = $searchopt[$ID]["datatype"] === 'decimal' && $searchtype === 'contains';
 
-                    if (preg_match("/([<>])(=?)[[:space:]]*(-?)[[:space:]]*([0-9]+(.[0-9]+)?)/", $val, $regs)) {
+                    if (preg_match("/([<>])(=?)[[:space:]]*(-?)[[:space:]]*([0-9]+(\.[0-9]+)?)/", $val, $regs)) {
                         if (in_array($searchtype, ["notequals", "notcontains"])) {
                             $nott = !$nott;
                         }
@@ -2024,13 +2011,18 @@ final class SQLProvider implements SearchProviderInterface
                             }
                         }
                         $regs[1] .= $regs[2];
+                        // progressbar uses LPAD() which returns zero-padded strings ('067' for 67%).
+                        // Quoting the value forces a lexicographic comparison ('067' < '20' → TRUE), so we keep it unquoted.
+                        $compare_value = $searchopt[$ID]["datatype"] === 'progressbar'
+                            ? (float) ($regs[3] . $regs[4])
+                            : $DB::quoteValue($regs[3] . $regs[4]);
                         return [
                             new QueryExpression(
                                 sprintf(
                                     "%s %s %s",
                                     $tocompute,
                                     $regs[1],
-                                    $DB::quoteValue($regs[3] . $regs[4])
+                                    $compare_value
                                 )
                             ),
                         ];
