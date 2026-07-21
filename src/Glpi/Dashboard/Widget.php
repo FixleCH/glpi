@@ -1270,6 +1270,7 @@ HTML;
             $options['legend'] = [
                 'show'      => true,
                 'left'      => 'left',
+                'top'       => 'top',
                 'textStyle' => [
                     'color' => $fg_color,
                 ],
@@ -1610,6 +1611,7 @@ HTML;
             $options['legend'] = [
                 'show'      => true,
                 'left'      => 'left',
+                'top'       => 'top',
                 'textStyle' => [
                     'color' => $fg_color,
                 ],
@@ -1919,6 +1921,7 @@ HTML;
             : "";
 
         $rand = (int) $p['rand'];
+        $alt = \htmlescape($p['alt']);
         $icon = \htmlescape($p['icon']);
         $class = \htmlescape($class);
 
@@ -1935,7 +1938,7 @@ HTML;
 
             <div class="card {$class}"
                  id="chart-{$rand}"
-                 title="{$p['alt']}"
+                 title="{$alt}"
                  style="background-color: {$bg_color}; color: {$fg_color}">
                 <div class='scrollable'>
                     <ul class='list'>

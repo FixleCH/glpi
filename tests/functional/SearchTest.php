@@ -62,6 +62,11 @@ use TaskCategory;
 use Ticket;
 use User;
 
+use function Safe\ob_get_clean;
+use function Safe\ob_start;
+use function Safe\preg_match;
+use function Safe\strtotime;
+
 class SearchTest extends DbTestCase
 {
     private function doSearch($itemtype, $params, array $forcedisplay = [])
@@ -440,6 +445,7 @@ class SearchTest extends DbTestCase
         ];
 
         $data = $this->doSearch('Computer', $search_params);
+        $sql  = $this->cleanSQL($data['sql']['search']);
 
         $regexps = [
             // join parts
@@ -457,7 +463,7 @@ class SearchTest extends DbTestCase
         foreach ($regexps as $regexp) {
             $this->assertMatchesRegularExpression(
                 $regexp,
-                $data['sql']['search']
+                $sql
             );
         }
 
@@ -478,7 +484,7 @@ class SearchTest extends DbTestCase
         foreach ($contains as $contain) {
             $this->assertStringContainsString(
                 $contain,
-                $data['sql']['search']
+                $sql
             );
         }
     }
@@ -504,6 +510,7 @@ class SearchTest extends DbTestCase
                 ],
             ],
         ]);
+        $sql = $this->cleanSQL($data['sql']['search']);
 
         $default_charset = DBConnection::getDefaultCharset();
 
@@ -517,7 +524,7 @@ class SearchTest extends DbTestCase
         foreach ($contains as $contain) {
             $this->assertStringContainsString(
                 $contain,
-                $data['sql']['search']
+                $sql
             );
         }
 
@@ -535,13 +542,13 @@ class SearchTest extends DbTestCase
         foreach ($regexps as $regexp) {
             $this->assertMatchesRegularExpression(
                 $regexp,
-                $data['sql']['search']
+                $sql
             );
         }
 
         $this->assertDoesNotMatchRegularExpression(
             "/OR\s*\(CONVERT\(`glpi_computers`\.`date_mod` USING {$default_charset}\)\s*LIKE '%test%'\s*\)\)/",
-            $data['sql']['search']
+            $sql
         );
     }
 
@@ -1532,7 +1539,10 @@ class SearchTest extends DbTestCase
             ])
         );
 
-        $search = \Search::manageParams('Ticket', ['reset' => 1], true, false);
+        // SavedSearch::load() sets this session flag before redirecting to the search page
+        $_SESSION['glpi_loaded_savedsearch'] = $bk_id;
+
+        $search = \Search::manageParams('Ticket', ['reset' => 1, 'savedsearches_id' => $bk_id], true, false);
         $this->assertEquals(
             [
                 'reset'        => 1,
@@ -1556,6 +1566,24 @@ class SearchTest extends DbTestCase
             ],
             $search
         );
+
+        // no stale 'reset' flag must remain in session after loading a saved search
+        $this->assertEquals($bk_id, $_SESSION['glpi_loaded_savedsearch']);
+        $this->assertArrayNotHasKey('reset', $_SESSION['glpisearch']['Ticket']);
+
+        // saved search criteria must survive a subsequent unrelated request (sort/pagination)
+        \Search::manageParams('Ticket', ['sort' => 6, 'order' => 'ASC'], true, false);
+        $this->assertEquals(
+            [
+                0 => [
+                    'field' => '5',
+                    'searchtype' => 'equals',
+                    'value' => $uid,
+                ],
+            ],
+            $_SESSION['glpisearch']['Ticket']['criteria']
+        );
+        $this->assertEquals($bk_id, $_SESSION['glpi_loaded_savedsearch']);
 
         // let's test for Computers
         $search = \Search::manageParams('Computer', ['reset' => 1], false, false);
@@ -1608,7 +1636,10 @@ class SearchTest extends DbTestCase
             ])
         );
 
-        $search = \Search::manageParams('Computer', ['reset' => 1], true, false);
+        // SavedSearch::load() sets this session flag before redirecting to the search page
+        $_SESSION['glpi_loaded_savedsearch'] = $bk_id;
+
+        $search = \Search::manageParams('Computer', ['reset' => 1, 'savedsearches_id' => $bk_id], true, false);
         $this->assertEquals(
             [
                 'reset'        => 1,
@@ -1633,6 +1664,24 @@ class SearchTest extends DbTestCase
             ],
             $search
         );
+
+        // no stale 'reset' flag must remain in session after loading a saved search
+        $this->assertEquals($bk_id, $_SESSION['glpi_loaded_savedsearch']);
+        $this->assertArrayNotHasKey('reset', $_SESSION['glpisearch']['Computer']);
+
+        // saved search criteria must survive a subsequent unrelated request (sort/pagination)
+        \Search::manageParams('Computer', ['sort' => 1, 'order' => 'ASC'], true, false);
+        $this->assertEquals(
+            [
+                0 => [
+                    'field' => 'view',
+                    'searchtype' => 'contains',
+                    'value' => 'test',
+                ],
+            ],
+            $_SESSION['glpisearch']['Computer']['criteria']
+        );
+        $this->assertEquals($bk_id, $_SESSION['glpi_loaded_savedsearch']);
     }
 
     public static function addSelectProvider()
@@ -2304,20 +2353,6 @@ class SearchTest extends DbTestCase
         }
     }
 
-    private function cleanSQL($sql)
-    {
-        // Clean whitespaces
-        $sql = preg_replace('/\s+/', ' ', $sql);
-
-        // Remove whitespaces around parenthesis
-        $sql = preg_replace('/\(\s+/', '(', $sql);
-        $sql = preg_replace('/\s+\)/', ')', $sql);
-
-        $sql = trim($sql);
-
-        return $sql;
-    }
-
     public function testAllAssetsFields()
     {
         global $CFG_GLPI, $DB;
@@ -2909,14 +2944,15 @@ class SearchTest extends DbTestCase
             ],
         ];
         $data = $this->doSearch('AllAssets', $search_params);
+        $sql = $this->cleanSQL($data['sql']['search']);
 
         $this->assertMatchesRegularExpression(
             "/OR\s*\(`glpi_entities`\.`completename`\s*LIKE '%test%'\s*\)/",
-            $data['sql']['search']
+            $sql
         );
         $this->assertMatchesRegularExpression(
             "/OR\s*\(`glpi_states`\.`completename`\s*LIKE '%test%'\s*\)/",
-            $data['sql']['search']
+            $sql
         );
 
         $types = [
@@ -2931,23 +2967,23 @@ class SearchTest extends DbTestCase
         foreach ($types as $type) {
             $this->assertStringContainsString(
                 "`$type`.`is_deleted` = 0",
-                $data['sql']['search']
+                $sql
             );
             $this->assertStringContainsString(
                 "AND `$type`.`is_template` = 0",
-                $data['sql']['search']
+                $sql
             );
             $this->assertStringContainsString(
                 "`$type`.`entities_id` IN ('$test_root', '$test_child_1', '$test_child_2', '$test_child_3')",
-                $data['sql']['search']
+                $sql
             );
             $this->assertStringContainsString(
                 "OR (`$type`.`is_recursive`='1' AND `$type`.`entities_id` IN (0))",
-                $data['sql']['search']
+                $sql
             );
             $this->assertMatchesRegularExpression(
                 "/`$type`\.`name` LIKE '%test%'/m",
-                $data['sql']['search']
+                $sql
             );
         }
 
@@ -6918,6 +6954,114 @@ class SearchTest extends DbTestCase
         $ids_found = array_column(array_column($data['data']['rows'], 'raw'), 'id');
         $this->assertContains($computer_high->getID(), $ids_found, 'Computer with 67% free space should match ">= 67"');
         $this->assertNotContains($computer_low->getID(), $ids_found, 'Computer with 10% free space must NOT match ">= 67"');
+    }
+
+    public function testCertificateRawSearchOptionsInheritance(): void
+    {
+        $item = new \Certificate();
+        $so = $item->rawSearchOptions();
+        $ids = array_column($so, 'id');
+
+        // No duplicate numeric IDs — would indicate parent options being re-added manually
+        $numeric_ids = array_values(array_filter($ids, 'is_numeric'));
+        $this->assertCount(count($numeric_ids), array_unique($numeric_ids), 'Certificate::rawSearchOptions() contains duplicate numeric IDs');
+
+        // assert that inherited options are present
+        $this->assertContains(1, $ids);
+        $this->assertContains(86, $ids);
+    }
+
+    public function testSoftwareLicenseRawSearchOptionsInheritance(): void
+    {
+        $item = new \SoftwareLicense();
+        $so = $item->rawSearchOptions();
+        $ids = array_column($so, 'id');
+
+        // No duplicate numeric IDs — would indicate parent options being re-added manually
+        $numeric_ids = array_values(array_filter($ids, 'is_numeric'));
+        $this->assertCount(count($numeric_ids), array_unique($numeric_ids), 'SoftwareLicense::rawSearchOptions() contains duplicate numeric IDs');
+
+        // assert that inherited options are present
+        $this->assertContains('1', $ids);
+        $this->assertContains('2', $ids);
+        $this->assertContains('13', $ids);
+        $this->assertContains('14', $ids);
+        $this->assertContains('19', $ids);
+        $this->assertContains('16', $ids);
+        $this->assertContains('121', $ids);
+        $this->assertContains('80', $ids);
+        $this->assertContains('86', $ids);
+    }
+
+    public function testTypeHasAssetUrlSearchOption(): void
+    {
+        global $CFG_GLPI;
+
+        foreach ($CFG_GLPI["asset_types"] as $itemtype) {
+            $item = new $itemtype();
+            $options = $item->rawSearchOptions();
+
+            $filtered_options = array_filter($options, function ($option) {
+                return isset($option['id']) && $option['id'] === 290
+                    && isset($option['field']) && $option['field'] === 'asset_url';
+            });
+
+            $this->assertEquals(
+                1,
+                count($filtered_options),
+                "Itemtype $itemtype does not have the asset_url search option (id=290)"
+            );
+        }
+    }
+
+    public function testSearchByAssetUrl(): void
+    {
+        global $CFG_GLPI;
+
+        $this->login();
+
+        $computer = $this->createItem(Computer::class, [
+            'name'        => '_test_computer_for_asset_url_search',
+            'entities_id' => $this->getTestRootEntity(true),
+        ]);
+        $expected_url = $CFG_GLPI['url_base'] . Computer::getFormURL(false) . '?id=' . $computer->getID();
+
+        //search for the computer by its asset URL
+        $result = \Search::getDatas(
+            Computer::class,
+            [
+                'criteria' => [
+                    [
+                        'field'      => 290,
+                        'searchtype' => 'contains',
+                        'value'      => $expected_url,
+                    ],
+                ],
+                'forcetoview' => [1, 290],
+            ]
+        );
+
+        $this->assertArrayHasKey('data', $result);
+        $this->assertEquals(1, $result['data']['totalcount']);
+        $this->assertEquals($computer->getID(), $result['data']['rows'][0]['raw']['id']);
+
+        //sreach for a non-existing asset URL
+        $result = \Search::getDatas(
+            Computer::class,
+            [
+                'criteria' => [
+                    [
+                        'field'      => 290,
+                        'searchtype' => 'contains',
+                        'value'      => Computer::getFormURL(false) . '?id=99999999',
+                    ],
+                ],
+                'forcetoview' => [1, 290],
+            ]
+        );
+
+        $this->assertArrayHasKey('data', $result);
+        $this->assertEquals(0, $result['data']['totalcount'], 'Should find no computer for a non-existing asset URL');
     }
 }
 

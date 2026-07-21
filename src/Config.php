@@ -42,6 +42,7 @@ use Glpi\Config\ProxyExclusions;
 use Glpi\Dashboard\Grid;
 use Glpi\Event;
 use Glpi\Helpdesk\HelpdeskTranslation;
+use Glpi\Kernel\Kernel;
 use Glpi\Mail\SMTP\OauthConfig;
 use Glpi\Plugin\Hooks;
 use Glpi\System\Diagnostic\SourceCodeIntegrityChecker;
@@ -49,7 +50,6 @@ use Glpi\System\RequirementsManager;
 use Glpi\Toolbox\ArrayNormalizer;
 use Glpi\UI\ThemeManager;
 use Safe\Exceptions\OpcacheException;
-use Symfony\Component\HttpFoundation\Request;
 
 use function Safe\chdir;
 use function Safe\exec;
@@ -407,7 +407,15 @@ class Config extends CommonDBTM
 
         if (array_key_exists('smtp_mode', $input) && in_array($input['smtp_mode'], [MAIL_SMTPSSL, MAIL_SMTPTLS], true)) {
             $input['smtp_mode'] = MAIL_SMTP;
-            Toolbox::deprecated('Usage of "MAIL_SMTPTLS" and "MAIL_SMTPTLS" SMTP mode is deprecated. Switch to "MAIL_SMTP" mode.');
+            Toolbox::deprecated('Usage of "MAIL_SMTPSSL" and "MAIL_SMTPTLS" SMTP mode is deprecated. Switch to "MAIL_SMTP" mode.');
+        }
+
+        if (isset($input['smtp_passwd']) && empty($input['smtp_passwd'])) {
+            unset($input['smtp_passwd']);
+        }
+
+        if (isset($input["_blank_smtp_passwd"]) && $input["_blank_smtp_passwd"]) {
+            $input['smtp_passwd'] = '';
         }
 
         if (array_key_exists('smtp_mode', $input) && (int) $input['smtp_mode'] === MAIL_SMTPOAUTH) {
@@ -452,13 +460,6 @@ class Config extends CommonDBTM
             $input['smtp_oauth_client_secret'] = '';
             $input['smtp_oauth_options'] = '{}';
             $input['smtp_oauth_refresh_token'] = '';
-        }
-
-        if (isset($input['smtp_passwd']) && empty($input['smtp_passwd'])) {
-            unset($input['smtp_passwd']);
-        }
-        if (isset($input["_blank_smtp_passwd"]) && $input["_blank_smtp_passwd"]) {
-            $input['smtp_passwd'] = '';
         }
 
         return $input;
@@ -1388,13 +1389,14 @@ class Config extends CommonDBTM
      */
     public static function loadLegacyConfiguration()
     {
-        global $CFG_GLPI, $DB;
+        /** @var Kernel $kernel */
+        global $CFG_GLPI, $DB, $kernel;
 
         // Compute URLs base path.
         $root_doc = '';
         if (isset($_SERVER['REQUEST_URI'])) {
             // $_SERVER['REQUEST_URI'] is set, meaning that GLPI is accessed from web server.
-            $root_doc = Request::createFromGlobals()->getBasePath();
+            $root_doc = $kernel->getMainRequest()->getBasePath();
         }
         $CFG_GLPI['root_doc'] = $root_doc;
         $CFG_GLPI['typedoc_icon_dir'] = $root_doc . '/pics/icones';
@@ -1965,7 +1967,7 @@ class Config extends CommonDBTM
 
         // No valid email was found
         trigger_error(
-            'No email address is not defined in configuration.',
+            'No email address is defined in configuration.',
             E_USER_WARNING
         );
 

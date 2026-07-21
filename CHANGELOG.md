@@ -3,7 +3,30 @@
 The present file will list all changes made to the project; according to the
 [Keep a Changelog](http://keepachangelog.com/) project.
 
-## [11.0.8] unreleased
+## [11.0.9] unreleased
+
+### Added
+
+### Changed
+- Fixed searching values with multiple concurrent spaces.
+
+### Deprecated
+
+### Removed
+
+### API changes
+
+#### Added
+
+#### Changes
+- Duplicate spaces in some SQL queries, including values, (usually ones that used subqueries) no longer removed.
+
+#### Deprecated
+
+#### Removed
+
+
+## [11.0.8] 2026-06-24
 
 ### Added
 
@@ -871,7 +894,28 @@ If you have anything pinned to specific v2 versions, please try to pin to the la
 - Usage of the `$link` and `$name` parameters in `Auth::getMethodName()`.
 
 
-## [10.0.26] unreleased
+## [10.0.27] unreleased
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### API changes
+
+#### Added
+
+#### Changes
+
+#### Deprecated
+
+#### Removed
+
+
+## [10.0.26] 2026-06-24
 
 ### Added
 

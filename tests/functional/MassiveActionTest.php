@@ -35,6 +35,7 @@
 namespace tests\units;
 
 use Change;
+use Change_Problem;
 use Change_Ticket;
 use CommonDBTM;
 use Contract;
@@ -546,6 +547,7 @@ class MassiveActionTest extends DbTestCase
             $input['problems_id'] = $problem->add([
                 'name'    => "tmp",
                 'content' => "tmp",
+                'entities_id' => $item->getEntityID(),
             ]);
             $this->assertGreaterThan(0, $input['problems_id']);
 
@@ -566,6 +568,71 @@ class MassiveActionTest extends DbTestCase
 
         // Reset rights
         $_SESSION['glpiactiveprofile'][Problem::$rightname] = $old_session;
+    }
+
+    public static function linkToProblemEntityProvider(): array
+    {
+        return [
+            'same entity — accepted' => [
+                'ticket'              => getItemByTypeName('Ticket', '_ticket01'),
+                'problem_entity_name' => '_test_root_entity',
+                'problem_recursive'   => false,
+                'expected_ok'         => 1,
+                'expected_ko'         => 0,
+            ],
+            'cross-entity non-recursive — rejected' => [
+                // Ticket is in _test_child_1; problem is in _test_child_2 (sibling,
+                // not an ancestor) → incompatible even if is_recursive were set.
+                'ticket'              => getItemByTypeName('Ticket', '_ticket03'),
+                'problem_entity_name' => '_test_child_2',
+                'problem_recursive'   => false,
+                'expected_ok'         => 0,
+                'expected_ko'         => 1,
+            ],
+            'recursive parent problem on child-entity ticket — accepted' => [
+                // Problem is in the parent entity _test_root_entity with
+                // is_recursive = 1 → visible from child entity _test_child_1.
+                'ticket'              => getItemByTypeName('Ticket', '_ticket03'),
+                'problem_entity_name' => '_test_root_entity',
+                'problem_recursive'   => true,
+                'expected_ok'         => 1,
+                'expected_ko'         => 0,
+            ],
+        ];
+    }
+
+    #[DataProvider('linkToProblemEntityProvider')]
+    public function testProcessMassiveActionsForOneItemtype_linkToProblem_entityCheck(
+        Ticket $ticket,
+        string $problem_entity_name,
+        bool   $problem_recursive,
+        int    $expected_ok,
+        int    $expected_ko
+    ): void {
+        // Grant Problem update right
+        $old_right = $_SESSION['glpiactiveprofile'][Problem::$rightname] ?? 0;
+        $_SESSION['glpiactiveprofile'][Problem::$rightname] = UPDATE;
+
+        $problem    = new Problem();
+        $problem_id = $problem->add([
+            'name'         => 'entity check problem',
+            'content'      => 'entity check problem',
+            'entities_id'  => getItemByTypeName('Entity', $problem_entity_name, true),
+            'is_recursive' => (int) $problem_recursive,
+        ]);
+        $this->assertGreaterThan(0, $problem_id);
+
+        @$this->processMassiveActionsForOneItemtype(
+            'link_to_problem',
+            $ticket,
+            [$ticket->fields['id']],
+            ['problems_id' => $problem_id],
+            $expected_ok,
+            $expected_ko,
+            Ticket::class
+        );
+
+        $_SESSION['glpiactiveprofile'][Problem::$rightname] = $old_right;
     }
 
     protected function resolveTicketsProvider()
@@ -1654,5 +1721,82 @@ class MassiveActionTest extends DbTestCase
                 'content'    => 'task from change massive action',
             ])
         );
+    }
+
+    public static function unlinkProvider(): array
+    {
+        return [
+            'Problem - Ticket' => [Problem::class, Ticket::class,  Problem_Ticket::class],
+            'Ticket - Problem' => [Ticket::class,  Problem::class, Problem_Ticket::class],
+            'Change - Ticket'  => [Change::class,  Ticket::class,  Change_Ticket::class],
+            'Ticket - Change'  => [Ticket::class,  Change::class,  Change_Ticket::class],
+            'Change - Problem' => [Change::class,  Problem::class, Change_Problem::class],
+            'Problem - Change' => [Problem::class, Change::class,  Change_Problem::class],
+        ];
+    }
+
+    #[DataProvider('unlinkProvider')]
+    public function testUnlinkMassiveAction(string $source_itemtype, string $target_itemtype, string $link_class): void
+    {
+        $this->login('glpi', 'glpi');
+
+        $source = $this->createItem($source_itemtype, ['name' => 'source', 'content' => 'content']);
+        $target = $this->createItem($target_itemtype, ['name' => 'target', 'content' => 'content']);
+        $this->createItem($link_class, [
+            $source_itemtype::getForeignKeyField() => $source->getID(),
+            $target_itemtype::getForeignKeyField() => $target->getID(),
+        ]);
+
+        $this->processMassiveActionsForOneItemtype(
+            'unlink',
+            $target,
+            [$target->getID()],
+            ['source_itemtype' => $source_itemtype, 'source_items_id' => $source->getID()],
+            1,
+            0,
+            $link_class
+        );
+
+        $this->assertSame(0, countElementsInTable($link_class::getTable(), [
+            $source_itemtype::getForeignKeyField() => $source->getID(),
+            $target_itemtype::getForeignKeyField() => $target->getID(),
+        ]));
+        $this->assertSame(1, countElementsInTable($source_itemtype::getTable(), ['id' => $source->getID(), 'is_deleted' => 0]));
+        $this->assertSame(1, countElementsInTable($target_itemtype::getTable(), ['id' => $target->getID(), 'is_deleted' => 0]));
+    }
+
+    #[DataProvider('unlinkProvider')]
+    public function testUnlinkMassiveActionNoRight(string $source_itemtype, string $target_itemtype, string $link_class): void
+    {
+        $this->login('glpi', 'glpi');
+
+        $source = $this->createItem($source_itemtype, ['name' => 'source', 'content' => 'content']);
+        $target = $this->createItem($target_itemtype, ['name' => 'target', 'content' => 'content']);
+        $this->createItem($link_class, [
+            $source_itemtype::getForeignKeyField() => $source->getID(),
+            $target_itemtype::getForeignKeyField() => $target->getID(),
+        ]);
+
+        // canDeleteItem() on the link allows deletion if EITHER linked item can be
+        // updated. Strip UPDATE from both sides so the rights check fails
+        // and the action returns ACTION_NORIGHT.
+        $_SESSION['glpiactiveprofile'][$source_itemtype::$rightname] = 0;
+        $_SESSION['glpiactiveprofile'][$target_itemtype::$rightname] = 0;
+
+        $this->processMassiveActionsForOneItemtype(
+            'unlink',
+            $target,
+            [$target->getID()],
+            ['source_itemtype' => $source_itemtype, 'source_items_id' => $source->getID()],
+            0,
+            1,
+            $link_class
+        );
+
+        // Link must still exist, nothing was deleted.
+        $this->assertSame(1, countElementsInTable($link_class::getTable(), [
+            $source_itemtype::getForeignKeyField() => $source->getID(),
+            $target_itemtype::getForeignKeyField() => $target->getID(),
+        ]));
     }
 }

@@ -44,6 +44,7 @@ use Glpi\Exception\PasswordTooWeakException;
 use Glpi\Features\Clonable;
 use Glpi\Features\TreeBrowse;
 use Glpi\Features\TreeBrowseInterface;
+use Glpi\Kernel\Kernel;
 use Glpi\Plugin\Hooks;
 use Glpi\Security\TOTPManager;
 use LDAP\Connection;
@@ -51,7 +52,6 @@ use LDAP\Result;
 use Sabre\VObject\Component\VCard;
 use Safe\DateTime;
 use Safe\Exceptions\FilesystemException;
-use Symfony\Component\HttpFoundation\Request;
 
 use function Safe\fclose;
 use function Safe\fopen;
@@ -131,6 +131,9 @@ class User extends CommonDBTM implements TreeBrowseInterface
         unset($input['api_token_date']);
         unset($input['cookie_token']);
         unset($input['cookie_token_date']);
+        unset($input['user_dn_hash']);
+        unset($input['user_dn']);
+        unset($input['sync_field']);
         return $input;
     }
 
@@ -986,6 +989,10 @@ class User extends CommonDBTM implements TreeBrowseInterface
             }
         }
 
+        if (isset($input['use_mode']) && !Config::canUpdate()) {
+            unset($input['use_mode']);
+        }
+
         return $input;
     }
 
@@ -1106,6 +1113,7 @@ class User extends CommonDBTM implements TreeBrowseInterface
                 }
                 if (!str_starts_with($fullpath, realpath(GLPI_TMP_DIR))) {
                     trigger_error(sprintf('Invalid picture path `%s`', $input["_picture"]), E_USER_WARNING);
+                    return false;
                 }
                 if (Document::isImage($fullpath)) {
                     // Unlink old picture (clean on changing format)
@@ -1268,13 +1276,17 @@ class User extends CommonDBTM implements TreeBrowseInterface
             }
         }
 
-        // blank password when authtype changes
-        if (
-            isset($input["authtype"])
-            && $input["authtype"] != Auth::DB_GLPI
-            && $input["authtype"] != $this->getField('authtype')
-        ) {
-            $input["password"] = "";
+        if (isset($input['authtype'])) {
+            if (
+                Session::getLoginUserID() !== false // always allow update from backend routines
+                && !Session::haveRight(self::$rightname, self::UPDATEAUTHENT)
+            ) {
+                // prevent unexpected authentication type change
+                unset($input['authtype']);
+            } elseif ($input['authtype'] != $this->fields['authtype'] && $input['authtype'] != Auth::DB_GLPI) {
+                // blank password when authtype changes
+                $input['password'] = '';
+            }
         }
 
         // Update User in the database
@@ -1381,6 +1393,10 @@ class User extends CommonDBTM implements TreeBrowseInterface
         }
 
         // Manage preferences fields
+        if (isset($input['use_mode']) && !Config::canUpdate()) {
+            unset($input['use_mode']);
+        }
+
         if (Session::getLoginUserID() == $input['id']) {
             if (
                 isset($input['use_mode'])
@@ -2772,7 +2788,6 @@ class User extends CommonDBTM implements TreeBrowseInterface
         if (count($a_field) == 0) {
             return true;
         }
-        $this->willProcessRuleRight();
         foreach ($a_field as $field => $key) {
             $value = $_SERVER[$key] ?? null;
             if (empty($value)) {
@@ -2845,6 +2860,8 @@ class User extends CommonDBTM implements TreeBrowseInterface
                 'email'  => $this->fields["_emails"] ?? [],
                 'login'  => $this->fields["name"],
             ]);
+
+            $this->willProcessRuleRight();
 
             //If rule  action is ignore import
             if (isset($this->fields["_stop_import"])) {
@@ -3097,7 +3114,8 @@ HTML;
 
     public function pre_updateInDB()
     {
-        global $DB;
+        /** @var Kernel $kernel */
+        global $DB, $kernel;
 
         if (($key = array_search('name', $this->updates)) !== false) {
             /// Check if user does not exists
@@ -3142,7 +3160,7 @@ HTML;
         if (
             Session::getLoginUserID() === (int) $this->input['id']
             && !Session::haveRight("user", UPDATE)
-            && !str_starts_with(Request::createFromGlobals()->getPathInfo(), "/front/login.php")
+            && !str_starts_with($kernel->getMainRequest()->getPathInfo(), "/front/login.php")
             && isset($this->fields["authtype"])
         ) {
             // extauth ldap case
@@ -3306,10 +3324,17 @@ HTML;
                     return;
                 }
                 if (Session::haveRight(self::$rightname, self::UPDATEAUTHENT)) {
-                    if (User::changeAuthMethod($ids, $input["authtype"], $input["auths_id"])) {
-                        $ma->itemDone($item->getType(), $ids, MassiveAction::ACTION_OK);
-                    } else {
-                        $ma->itemDone($item->getType(), $ids, MassiveAction::ACTION_KO);
+                    foreach ($ids as $id) {
+                        $user = new User();
+                        if (!$user->can($id, UPDATE)) {
+                            $ma->itemDone($item::class, $id, MassiveAction::ACTION_NORIGHT);
+                            $ma->addMessage($item->getErrorMessage(ERROR_RIGHT));
+                            continue;
+                        } elseif (User::changeAuthMethod([$id], $input["authtype"], $input["auths_id"])) {
+                            $ma->itemDone($item::class, $id, MassiveAction::ACTION_OK);
+                        } else {
+                            $ma->itemDone($item::class, $id, MassiveAction::ACTION_KO);
+                        }
                     }
                 } else {
                     $ma->itemDone($item->getType(), $ids, MassiveAction::ACTION_NORIGHT);
@@ -4744,10 +4769,6 @@ HTML;
     {
         global $DB;
 
-        if (!Session::haveRight(self::$rightname, self::UPDATEAUTHENT)) {
-            return false;
-        }
-
         if (
             $IDs !== []
             && in_array($authtype, [Auth::DB_GLPI, Auth::LDAP, Auth::MAIL, Auth::EXTERNAL])
@@ -5342,12 +5363,12 @@ HTML;
         $myuser = new self();
         if (
             !$myuser->getFromDB($users_id) // invalid user
-            || $myuser->fields['is_deleted_ldap'] == 0 // user already considered as restored from LDAP
+            || ($myuser->fields['is_deleted_ldap'] == 0 && $myuser->fields['is_active'] == 1) // already active, nothing to restore
         ) {
             return;
         }
 
-        //User is present in DB and in the directory but 'is_ldap_deleted' was true : it's been restored in LDAP
+        //User is present in DB and in the directory but was inactive or flagged as LDAP-deleted: restore it
         $tmp = [
             'id'              => $users_id,
             'is_deleted_ldap' => 0,
@@ -5461,6 +5482,7 @@ HTML;
     {
         TemplateRenderer::getInstance()->display('forgotpassword.html.twig', [
             'title'    => __('Password Initialization'),
+            'type'     => 'init',
             'token'    => $token,
             'token_ok' => User::getUserByForgottenPasswordToken($token) !== null,
         ]);
@@ -5488,6 +5510,7 @@ HTML;
     {
         TemplateRenderer::getInstance()->display('forgotpassword.html.twig', [
             'title' => __('Password initialization'),
+            'type'  => 'init',
         ]);
     }
 
@@ -6711,11 +6734,12 @@ HTML;
     /**
      * Get user link.
      *
-     * @param bool $enable_anonymization
+     * @param bool  $enable_anonymization
+     * @param array<string, mixed> $options
      *
      * @return string
      */
-    public function getUserLink(bool $enable_anonymization = false): string
+    public function getUserLink(bool $enable_anonymization = false, $options = []): string
     {
         if (
             $enable_anonymization
@@ -6727,7 +6751,7 @@ HTML;
             return $anon;
         }
 
-        return $this->getLink();
+        return $this->getLink($options);
     }
 
     /**

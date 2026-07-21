@@ -44,6 +44,7 @@ use Glpi\Form\Form;
 use Glpi\Helpdesk\Tile\LinkableToTilesInterface;
 use Glpi\Helpdesk\Tile\TilesManager;
 use Glpi\Inventory\Conf;
+use Glpi\Plugin\Hooks;
 use Glpi\Toolbox\ArrayNormalizer;
 
 /**
@@ -689,7 +690,8 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
             return [new QueryExpression('true')];
         }
 
-        $criteria = ['glpi_profiles.interface' => Session::getCurrentInterface()];
+        $current_interface = Session::getCurrentInterface();
+        $criteria = ['glpi_profiles.interface' => $current_interface];
 
         // First, get all possible rights
         $right_subqueries = [];
@@ -698,7 +700,7 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
 
             if (
                 !is_array($val) // Do not include entities field added by login
-                && (Session::getCurrentInterface() === 'central'
+                && ($current_interface === 'central'
                  || in_array($key, self::$helpdesk_rights, true))
             ) {
                 $right_subqueries[] = [
@@ -831,6 +833,8 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
     {
         global $GLPI_CACHE;
 
+        $cache_key = 'profile_rights_core_' . (Session::getLanguage() ?? '');
+
         /**
          * Helper function to streamline rights definition
          * @param class-string<CommonDBTM>|null $itemtype
@@ -860,7 +864,7 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
             $dropdown_rights = (new Profile())->getRights();
             unset($dropdown_rights[DELETE], $dropdown_rights[UNLOCK]);
 
-            if (!$GLPI_CACHE->has('profile_rights_core')) {
+            if (!$GLPI_CACHE->has($cache_key)) {
                 $all_rights = [
                     'central' => [
                         'tracking' => [
@@ -1166,9 +1170,9 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
                         ],
                     ],
                 ];
-                $GLPI_CACHE->set('profile_rights_core', $all_rights);
+                $GLPI_CACHE->set($cache_key, $all_rights);
             }
-            $all_rights = $GLPI_CACHE->get('profile_rights_core');
+            $all_rights ??= $GLPI_CACHE->get($cache_key);
 
             // Add rights for custom assets
             $definitions = AssetDefinitionManager::getInstance()->getDefinitions(only_active: true);
@@ -3395,7 +3399,7 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
      */
     public static function getHelpdeskItemtypes()
     {
-        global $CFG_GLPI;
+        global $CFG_GLPI, $PLUGIN_HOOKS;
 
         $values = [];
         foreach ($CFG_GLPI["ticket_types"] as $key => $itemtype) {
@@ -3405,6 +3409,18 @@ class Profile extends CommonDBTM implements LinkableToTilesInterface
                 unset($CFG_GLPI["ticket_types"][$key]);
             }
         }
+
+        if (isset($PLUGIN_HOOKS[Hooks::ASSIGN_TO_TICKET])) {
+            $plugin_types = [];
+            foreach ($PLUGIN_HOOKS[Hooks::ASSIGN_TO_TICKET] as $plugin => $value) {
+                if (!Plugin::isPluginActive($plugin)) {
+                    continue;
+                }
+                $plugin_types = Plugin::doOneHook($plugin, Hooks::AUTO_ASSIGN_TO_TICKET, $plugin_types) ?? $plugin_types;
+            }
+            $values += $plugin_types;
+        }
+
         return $values;
     }
 

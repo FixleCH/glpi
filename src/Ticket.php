@@ -168,8 +168,7 @@ class Ticket extends CommonITILObject implements DefaultSearchRequestInterface
     {
 
         if (
-            isset($this->fields['is_deleted']) && $this->fields['is_deleted'] == 1
-            || isset($this->fields['status']) && in_array($this->fields['status'], static::getClosedStatusArray())
+            $this->isDeletedOrClosed()
         ) {
             return false;
         }
@@ -178,6 +177,40 @@ class Ticket extends CommonITILObject implements DefaultSearchRequestInterface
                   && ($this->countUsers(CommonITILActor::ASSIGN) == 0)));
     }
 
+
+    /**
+     * Check whether a specific user has the right to assign themselves to this ticket,
+     * based on their own profile rights rather than the current session.
+     *
+     * @since 11.0.8
+     * @param int $user_id
+     *
+     * @return bool
+     */
+    public function canAssignToUser(int $user_id): bool
+    {
+        if (
+            $this->isDeletedOrClosed()
+        ) {
+            return false;
+        }
+
+        $entity_id = $this->fields['entities_id'] ?? 0;
+
+        return (
+            Profile::haveUserRight($user_id, self::$rightname, self::STEAL, $entity_id)
+            || (
+                Profile::haveUserRight($user_id, self::$rightname, self::OWN, $entity_id)
+                && $this->countUsers(CommonITILActor::ASSIGN) == 0
+            )
+        );
+    }
+
+    private function isDeletedOrClosed(): bool
+    {
+        return (isset($this->fields['is_deleted']) && $this->fields['is_deleted'] == 1
+            || isset($this->fields['status']) && in_array($this->fields['status'], static::getClosedStatusArray()));
+    }
 
     /**
      * @param int $ticket_id
@@ -194,7 +227,7 @@ class Ticket extends CommonITILObject implements DefaultSearchRequestInterface
                 'tickets_id' => $ticket_id,
                 'users_id'   => $user_id,
             ]);
-            if (!count($ticket_user) && $ticket->canAssignToMe()) {
+            if (!count($ticket_user) && $ticket->canAssignToUser($user_id)) {
                 $ticket->update([
                     'id' => $ticket_id,
                     '_users_id_assign' => $user_id,
@@ -2295,6 +2328,8 @@ class Ticket extends CommonITILObject implements DefaultSearchRequestInterface
                 Problem::dropdown([
                     'name'      => 'problems_id',
                     'condition' => Problem::getOpenCriteria(),
+                    'entity'      => $_SESSION['glpiactive_entity'],
+                    'entity_sons' => $_SESSION['glpiactive_entity_recursive'],
                 ]);
                 echo '<br><br>';
                 echo Html::submit(_x('button', 'Link'), [
@@ -2469,7 +2504,37 @@ JAVASCRIPT;
                 }
 
                 $em = new Problem_Ticket();
+                $problem_entity    = $problem->getEntityID();
+                $problem_recursive = (bool) $problem->fields['is_recursive'];
+
                 foreach ($ids as $id) {
+                    $ticket_to_check = new Ticket();
+                    if (!$ticket_to_check->getFromDB($id)) {
+                        $ma->itemDone($item->getType(), $id, MassiveAction::ACTION_KO);
+                        $ma->addMessage($item->getErrorMessage(ERROR_ON_ACTION));
+                        continue;
+                    }
+
+                    $ticket_entity = $ticket_to_check->getEntityID();
+
+                    // A problem is compatible with a ticket when:
+                    // - both are in the same entity, OR
+                    // - the problem is in a parent entity and is recursive
+                    $ancestors      = getAncestorsOf('glpi_entities', $ticket_entity);
+                    $is_compatible  = ($problem_entity === $ticket_entity)
+                        || ($problem_recursive && in_array($problem_entity, $ancestors));
+
+                    if (!$is_compatible) {
+                        $ma->itemDone($item->getType(), $id, MassiveAction::ACTION_KO);
+                        $ma->addMessage(
+                            sprintf(
+                                __s('Ticket %d and the selected problem do not belong to compatible entities.'),
+                                $id
+                            )
+                        );
+                        continue;
+                    }
+
                     // Add new link
                     $res = $em->add([
                         'problems_id' => $input['problems_id'],

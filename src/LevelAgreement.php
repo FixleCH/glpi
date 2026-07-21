@@ -627,6 +627,24 @@ TWIG, $twig_params);
             'datatype'           => 'text',
         ];
 
+        $tab[] = [
+            'id'              => '80',
+            'table'           => Entity::getTable(),
+            'field'           => 'completename',
+            'name'            => Entity::getTypeName(1),
+            'massiveaction'   => false,
+            'datatype'        => 'dropdown',
+        ];
+
+        $tab[] = [
+            'id'            => '86',
+            'table'         => static::getTable(),
+            'field'         => 'is_recursive',
+            'name'          => __('Child entities'),
+            'datatype'      => 'bool',
+            'massiveaction' => false,
+        ];
+
         return $tab;
     }
 
@@ -698,6 +716,14 @@ TWIG, $twig_params);
      **/
     public function getActiveTimeBetween($start, $end)
     {
+        // Mirror Calendar::getActiveTimeBetween(): the `'NULL'` SQL sentinel string
+        // and empty bounds are not parseable dates and would make `Safe\strtotime()`
+        // throw an uncaught `DatetimeException` (e.g. on the "No calendar" branch
+        // below). Return early instead.
+        if (empty($start) || empty($end) || $start === 'NULL' || $end === 'NULL') {
+            return 0;
+        }
+
         if ($end < $start) {
             return 0;
         }
